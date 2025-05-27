@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Main Python application with Qwen agent
+  qwen-agent-chat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qwen-agent-chat:latest
+    container_name: qwen-agent-chat
+    ports:
+      - "5001:5001"
+    environment:
+      - DEBUG=True
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      # SSL Configuration
+      - VLLM_VERIFY_SSL=False
+      - PYTHONHTTPSVERIFY=0
+      - CURL_CA_BUNDLE=""
+      - REQUESTS_CA_BUNDLE=""
+      - SSL_VERIFY=false
+      # vLLM Configuration - UPDATE THESE WITH YOUR ACTUAL VALUES
+      - VLLM_CHAT_COMPLETIONS_URL=https://vllm.rangeresources.com/v1/chat/completions
+      - VLLM_MODELS_URL=https://vllm.rangeresources.com/v1/models
+      - VLLM_BASE_URL=https://vllm.rangeresources.com/v1/
+      - VLLM_MODEL=Qwen/Qwen3-30B-A3B-FP8
+      - VLLM_API_KEY=123456789
+      # Playwright Service Configuration
+      - PLAYWRIGHT_SERVICE_URL=http://playwright-service:3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      playwright-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - qwen-network
+
+  # Enterprise Playwright web scraping service
+  playwright-service:
+    build:
+      context: ./playwright-service
+      dockerfile: Dockerfile
+    image: playwright-service:latest
+    container_name: playwright-service
+    expose:
+      - "3000"
+    # Uncomment to access Playwright service directly (for debugging)
+    # ports:
+    #   - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Resource limits for enterprise deployment
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    networks:
+      - qwen-network
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: false  # Playwright needs write access for browser cache
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+
+networks:
+  qwen-network:
+    driver: bridge
+    name: qwen-network
+
+# Optional: Add volumes for persistent data
+# volumes:
+#   playwright-cache:
+#     driver: local

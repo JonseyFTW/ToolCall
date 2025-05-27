@@ -37,14 +37,6 @@
             margin-right: auto;
             border-bottom-left-radius: 0.25rem; /* rounded-bl-sm */
         }
-        .tool-activity {
-            background-color: #f3f4f6; /* bg-gray-100 */
-            border-left: 4px solid #3b82f6; /* border-l-4 border-blue-500 */
-            padding: 0.5rem;
-            margin-top: 0.5rem;
-            font-size: 0.875rem; /* text-sm */
-            border-radius: 0.25rem;
-        }
         /* Custom scrollbar for chat window */
         #chat-window::-webkit-scrollbar {
             width: 8px;
@@ -78,33 +70,12 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
-        .typing-indicator {
-            background-color: #e5e7eb;
-            color: #6b7280;
-            padding: 0.75rem 1rem;
-            border-radius: 0.75rem;
-            max-width: 80%;
-            align-self: flex-start;
-            margin-right: auto;
-            border-bottom-left-radius: 0.25rem;
-            font-style: italic;
-        }
-        .typing-dots {
-            display: inline-block;
-            animation: typingDots 1.5s infinite;
-        }
-        @keyframes typingDots {
-            0%, 60%, 100% { content: '...'; }
-            20% { content: ''; }
-            40% { content: '.'; }
-        }
     </style>
 </head>
 <body class="bg-gray-100">
     <div class="main-container max-w-3xl mx-auto bg-white shadow-lg flex flex-col">
         <header class="bg-gray-800 text-white p-4 text-center rounded-t-lg">
             <h1 class="text-2xl font-semibold">Qwen-Agent Chat (with Web Access)</h1>
-            <p class="text-sm text-gray-300 mt-1">Powered by Qwen3-30B with Playwright web browsing</p>
         </header>
         
         <div id="chat-window" class="chat-area p-4 md:p-6">
@@ -121,12 +92,12 @@
                 <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
                 <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
             </svg>
-            <span id="loading-text">Qwen is thinking...</span>
+            Qwen is thinking...
         </div>
 
         <footer class="p-4 md:p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
             <div class="flex items-center space-x-2">
-                <input type="text" id="message-input" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow duration-150" placeholder="Ask about current events, sports scores, or anything...">
+                <input type="text" id="message-input" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow duration-150" placeholder="Ask Qwen (e.g., 'What's new in AI today?')...">
                 <button id="send-button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-lg shadow-md hover:shadow-lg transition-all duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
                         <path d="M3.105 3.105a1.5 1.5 0 012.122-.001L19.43 14.43a1.515 1.515 0 01.301 1.907l-1.206 1.709a1.516 1.516 0 01-1.908.302L3.105 5.226a1.5 1.5 0 01-.001-2.121z" />
@@ -135,7 +106,8 @@
                 </button>
             </div>
             <p class="text-xs text-gray-500 mt-3 text-center">
-                Model: Qwen3-30B via vLLM • Web browsing enabled • Fixed SSL & response handling
+                Model: Qwen3 via local vLLM. API Key: ****`12345`. Tool: WebBrowser.
+                <br>Ensure backend `app.py` has the correct `LLM_MODEL_NAME`.
             </p>
         </footer>
     </div>
@@ -145,7 +117,6 @@
         const messageInput = document.getElementById('message-input');
         const sendButton = document.getElementById('send-button');
         const loadingIndicator = document.getElementById('loading-indicator');
-        const loadingText = document.getElementById('loading-text');
 
         function escapeHtml(unsafe) {
             return unsafe
@@ -156,54 +127,18 @@
                  .replace(/'/g, "&#039;");
         }
 
-        function formatMessage(message) {
-            // Simple markdown-like formatting
-            let formatted = escapeHtml(message);
-            
-            // Bold text **text**
-            formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-            
-            // Tool activity section formatting
-            if (formatted.includes('**Tool Activity:**')) {
-                const parts = formatted.split('**Tool Activity:**');
-                if (parts.length === 2) {
-                    const mainText = parts[0].replace(/\n/g, '<br>');
-                    const toolActivity = parts[1].replace(/\n/g, '<br>');
-                    return mainText + '<div class="tool-activity"><strong>🔧 Tool Activity:</strong>' + toolActivity + '</div>';
-                }
-            }
-            
-            // Regular newlines to <br>
-            return formatted.replace(/\n/g, '<br>');
-        }
-
         function addMessage(message, sender) {
             const bubble = document.createElement('div');
             bubble.classList.add('chat-bubble', sender === 'user' ? 'user-bubble' : 'bot-bubble');
             
-            // Format and display message
-            const formattedMessage = formatMessage(message);
+            // Sanitize and format message (replace newlines with <br>)
+            const sanitizedMessage = escapeHtml(message);
+            const formattedMessage = sanitizedMessage.replace(/\n/g, '<br>');
             bubble.innerHTML = formattedMessage; 
             
             chatWindow.appendChild(bubble);
             // Scroll to the bottom smoothly
             chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
-        }
-
-        function addTypingIndicator() {
-            const typingBubble = document.createElement('div');
-            typingBubble.classList.add('typing-indicator');
-            typingBubble.id = 'typing-indicator';
-            typingBubble.innerHTML = 'Qwen is thinking<span class="typing-dots">...</span>';
-            chatWindow.appendChild(typingBubble);
-            chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
-        }
-
-        function removeTypingIndicator() {
-            const typingIndicator = document.getElementById('typing-indicator');
-            if (typingIndicator) {
-                typingIndicator.remove();
-            }
         }
 
         async function sendMessage() {
@@ -212,23 +147,9 @@
 
             addMessage(query, 'user');
             messageInput.value = '';
-            
-            // Show loading state
             loadingIndicator.classList.remove('hidden');
             sendButton.disabled = true;
             messageInput.disabled = true;
-            
-            // Update loading text based on query content
-            if (query.toLowerCase().includes('web') || 
-                query.toLowerCase().includes('current') || 
-                query.toLowerCase().includes('recent') ||
-                query.toLowerCase().includes('news') ||
-                query.toLowerCase().includes('today') ||
-                query.toLowerCase().includes('latest')) {
-                loadingText.textContent = 'Browsing the web for current information...';
-            } else {
-                loadingText.textContent = 'Qwen is thinking...';
-            }
 
             try {
                 const response = await fetch('/chat', {
@@ -249,10 +170,9 @@
 
             } catch (error) {
                 console.error('Error sending message:', error);
-                addMessage(`Sorry, an error occurred: ${error.message}\n\nPlease check the backend logs for more details.`, 'bot');
+                addMessage(`Sorry, an error occurred: ${error.message}`, 'bot');
             } finally {
                 loadingIndicator.classList.add('hidden');
-                loadingText.textContent = 'Qwen is thinking...';
                 sendButton.disabled = false;
                 messageInput.disabled = false;
                 messageInput.focus();
@@ -268,7 +188,7 @@
         });
 
         // Initial welcome message
-        addMessage("Hello! I'm your Qwen-powered assistant with web browsing capabilities. I can search the internet for current information, sports scores, news, and more. What would you like to know?", 'bot');
+        addMessage("Hello! I'm your Qwen-powered assistant. I can use a browser tool to find up-to-date information. What can I help you with today?", 'bot');
         messageInput.focus();
     </script>
 </body>
