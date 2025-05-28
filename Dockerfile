@@ -30,16 +30,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the requirements file into the container at /app
 COPY requirements.txt .
 
-# Install Python packages
+# Install Python packages as root (to avoid permission issues)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
+
+# Fix matplotlib font permissions issue
+RUN python -c "import matplotlib; matplotlib.use('Agg')" || true
 
 # Copy the rest of the application code
 COPY . .
 
 # Create non-root user for security
 RUN groupadd -r qwen && useradd -r -g qwen -s /bin/false qwen
-RUN chown -R qwen:qwen /app
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /home/qwen/.ipython /home/qwen/.jupyter /home/qwen/.cache && \
+    chown -R qwen:qwen /home/qwen && \
+    chown -R qwen:qwen /app
+
+# Set HOME environment variable
+ENV HOME=/home/qwen
+ENV MPLCONFIGDIR=/home/qwen/.matplotlib
 
 # Switch to non-root user
 USER qwen

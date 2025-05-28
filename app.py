@@ -9,6 +9,7 @@ import urllib3
 import requests
 from bs4 import BeautifulSoup
 import time
+import certifi
 
 app = Flask(__name__)
 
@@ -24,48 +25,50 @@ PLAYWRIGHT_SERVICE_URL = os.getenv("PLAYWRIGHT_SERVICE_URL", "http://playwright-
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
 
-# --- SSL Configuration based on environment ---
+# --- Enhanced SSL Configuration ---
 if not VERIFY_SSL:
     app.logger.info("SSL verification is DISABLED based on VLLM_VERIFY_SSL environment variable")
     
     # Disable SSL warnings
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     
-    # Set environment variables
+    # Set environment variables - use certifi bundle as fallback
     os.environ['PYTHONHTTPSVERIFY'] = '0'
-    os.environ['CURL_CA_BUNDLE'] = ''
-    os.environ['REQUESTS_CA_BUNDLE'] = ''
+    os.environ['CURL_CA_BUNDLE'] = certifi.where()  # Use certifi bundle
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()  # Use certifi bundle
+    os.environ['SSL_CERT_FILE'] = certifi.where()
     
     # Global SSL context modification
     ssl._create_default_https_context = ssl._create_unverified_context
     
-    # Monkey patch httpx and requests globally
+    # Create custom session with proper SSL handling
     import requests
     from requests.adapters import HTTPAdapter
+    from requests.packages.urllib3.util.ssl_ import create_urllib3_context
     
-    class InsecureHTTPAdapter(HTTPAdapter):
+    class SSLAdapter(HTTPAdapter):
         def init_poolmanager(self, *args, **kwargs):
-            import ssl
-            kwargs['ssl_context'] = ssl.create_default_context()
-            kwargs['ssl_context'].check_hostname = False
-            kwargs['ssl_context'].verify_mode = ssl.CERT_NONE
+            context = create_urllib3_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            kwargs['ssl_context'] = context
             return super().init_poolmanager(*args, **kwargs)
     
-    # Create a session with disabled SSL verification
+    # Create a session with custom SSL adapter
     session = requests.Session()
-    session.mount('https://', InsecureHTTPAdapter())
-    session.mount('http://', InsecureHTTPAdapter())
+    session.mount('https://', SSLAdapter())
+    session.mount('http://', HTTPAdapter())
     
-    # Monkey patch requests module
-    original_request = requests.request
-    def patched_request(*args, **kwargs):
+    # Monkey patch requests to use our session
+    old_request = requests.request
+    def new_request(method, url, **kwargs):
         kwargs['verify'] = False
-        return original_request(*args, **kwargs)
-    requests.request = patched_request
-    requests.get = lambda *args, **kwargs: patched_request('GET', *args, **kwargs)
-    requests.post = lambda *args, **kwargs: patched_request('POST', *args, **kwargs)
+        return session.request(method=method, url=url, **kwargs)
+    requests.request = new_request
+    requests.get = lambda url, **kwargs: new_request('GET', url, **kwargs)
+    requests.post = lambda url, **kwargs: new_request('POST', url, **kwargs)
     
-    # Patch OpenAI client before importing qwen_agent
+    # Patch OpenAI client
     import openai
     original_openai_init = openai.OpenAI.__init__
     def patched_openai_init(self, *args, **kwargs):
@@ -75,6 +78,9 @@ if not VERIFY_SSL:
 
 else:
     app.logger.info("SSL verification is ENABLED")
+    # Even with SSL enabled, ensure we have proper certificates
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+    os.environ['SSL_CERT_FILE'] = certifi.where()
 
 # Configure LLM for Qwen-Agent
 llm_cfg = {
@@ -83,6 +89,8 @@ llm_cfg = {
     "api_key": API_KEY,
     "generate_cfg": {
         "top_p": 0.8,
+        "temperature": 0.7,
+        "max_tokens": 2000,
     }
 }
 
@@ -94,99 +102,97 @@ app.logger.info(f"Playwright Service: {PLAYWRIGHT_SERVICE_URL}")
 tools_for_assistant = ['code_interpreter']
 app.logger.info(f"Tools initialized: {tools_for_assistant}")
 
-# Enhanced system prompt with Playwright service integration
-system_prompt = (
-    "You are a helpful AI assistant with advanced web browsing capabilities. Your primary goal is to answer the user's questions accurately. "
-    "If you don't know the answer, or if the question requires up-to-date information "
-    "(e.g., current events, recent data, specific website content), "
-    "you MUST use the 'code_interpreter' tool. "
-    "\n"
-    "For web browsing, you have access to a professional Playwright service that can handle JavaScript-heavy websites. "
-    "Use this Python code template for web scraping:\n"
-    "```python\n"
-    "import requests\n"
-    "import json\n"
-    "from bs4 import BeautifulSoup\n\n"
-    "# Playwright service URL (enterprise-grade browser automation)\n"
-    "PLAYWRIGHT_SERVICE = 'http://playwright-service:3000'\n\n"
-    "def scrape_with_playwright(url, action='content'):\n"
-    "    \"\"\"Use enterprise Playwright service for reliable web scraping\"\"\"\n"
-    "    try:\n"
-    "        response = requests.post(f'{PLAYWRIGHT_SERVICE}/scrape', \n"
-    "                               json={\n"
-    "                                   'url': url,\n"
-    "                                   'action': action,  # 'content', 'text', 'title'\n"
-    "                                   'timeout': 15000\n"
-    "                               }, \n"
-    "                               timeout=30)\n"
-    "        response.raise_for_status()\n"
-    "        result = response.json()\n"
-    "        \n"
-    "        if result.get('success'):\n"
-    "            return result.get('data')\n"
-    "        else:\n"
-    "            print(f'Playwright error: {result.get(\"error\")}')\n"
-    "            return None\n"
-    "    except Exception as e:\n"
-    "        print(f'Error calling Playwright service: {e}')\n"
-    "        return None\n\n"
-    "# Example usage for sports scores:\n"
-    "print('Fetching NBA scores from ESPN...')\n"
-    "espn_html = scrape_with_playwright('https://www.espn.com/nba/scoreboard')\n"
-    "\n"
-    "if espn_html:\n"
-    "    soup = BeautifulSoup(espn_html, 'html.parser')\n"
-    "    print(f'Page title: {soup.title.string if soup.title else \"No title\"}')\n"
-    "    \n"
-    "    # Look for Thunder/OKC games\n"
-    "    page_text = soup.get_text().lower()\n"
-    "    if 'thunder' in page_text or 'okc' in page_text or 'oklahoma city' in page_text:\n"
-    "        print('Found Thunder game information!')\n"
-    "        \n"
-    "        # Extract game information\n"
-    "        game_elements = soup.find_all(['div', 'span', 'p'], \n"
-    "                                    string=lambda text: text and \n"
-    "                                    ('thunder' in text.lower() or 'okc' in text.lower()))\n"
-    "        \n"
-    "        for element in game_elements[:5]:  # First 5 matches\n"
-    "            # Get parent container for more context\n"
-    "            parent = element.find_parent(['div', 'section', 'article'])\n"
-    "            if parent:\n"
-    "                context = parent.get_text(strip=True)[:200]  # First 200 chars\n"
-    "                print(f'Thunder mention: {context}')\n"
-    "    else:\n"
-    "        print('No Thunder games found on current scoreboard')\n"
-    "        print('Trying alternative approach...')\n"
-    "        \n"
-    "        # Look for recent games or alternative sources\n"
-    "        alt_url = 'https://www.nba.com/thunder/schedule'\n"
-    "        thunder_page = scrape_with_playwright(alt_url)\n"
-    "        if thunder_page:\n"
-    "            soup2 = BeautifulSoup(thunder_page, 'html.parser')\n"
-    "            print(f'Thunder schedule page loaded: {soup2.title.string if soup2.title else \"No title\"}')\n"
-    "else:\n"
-    "    print('Failed to load ESPN page, trying simpler HTTP request...')\n"
-    "    # Fallback to simple requests\n"
-    "    try:\n"
-    "        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}\n"
-    "        resp = requests.get('https://www.espn.com/nba/teams', headers=headers, timeout=10)\n"
-    "        if resp.status_code == 200:\n"
-    "            print('Fallback method successful')\n"
-    "            soup_fallback = BeautifulSoup(resp.content, 'html.parser')\n"
-    "            # Process fallback content...\n"
-    "    except Exception as e:\n"
-    "        print(f'Fallback also failed: {e}')\n"
-    "```\n"
-    "\n"
-    "The Playwright service is enterprise-grade and can handle:\n"
-    "- JavaScript-heavy websites\n"
-    "- Modern SPAs (Single Page Applications)\n"
-    "- Dynamic content loading\n"
-    "- Sports websites like ESPN, NBA.com, etc.\n"
-    "\n"
-    "Always extract relevant information and present it clearly to the user. "
-    "If web scraping fails, suggest manual verification of the source."
-)
+# Simplified system prompt that works better with code_interpreter
+system_prompt = """You are a helpful AI assistant with web browsing capabilities.
+
+When asked about current information (sports scores, news, weather, etc.), use the code_interpreter tool to search the web.
+
+IMPORTANT: When using code_interpreter, write simple, complete Python code blocks. Here's the correct format:
+
+For web searches, use this template:
+```python
+import requests
+from bs4 import BeautifulSoup
+import os
+
+# Configure SSL
+os.environ['REQUESTS_CA_BUNDLE'] = ''
+os.environ['SSL_CERT_FILE'] = ''
+
+# Search for information
+query = "YOUR SEARCH QUERY HERE"
+
+# Direct approach - try specific sports sites
+if "score" in query.lower() or "game" in query.lower():
+    # Use Playwright service for JavaScript sites
+    playwright_url = "http://playwright-service:3000/scrape"
+    
+    urls_to_try = [
+        "https://www.espn.com/nhl/scoreboard",
+        "https://www.espn.com/nba/scoreboard", 
+        "https://www.thescore.com/nhl/news"
+    ]
+    
+    for url in urls_to_try:
+        try:
+            print(f"Checking {url}...")
+            payload = {"url": url, "action": "content", "timeout": 20000}
+            response = requests.post(playwright_url, json=payload, timeout=25, verify=False)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    content = result.get('data', '')
+                    soup = BeautifulSoup(content, 'html.parser')
+                    text = soup.get_text()
+                    
+                    # Look for relevant information
+                    lines = text.split('\\n')
+                    found_info = False
+                    
+                    for line in lines:
+                        line = line.strip()
+                        # Look for team names and scores
+                        if any(term in line.lower() for term in query.lower().split()):
+                            if len(line) > 15:  # Skip very short lines
+                                print(f"Found: {line}")
+                                found_info = True
+                    
+                    if found_info:
+                        print(f"\\nSuccessfully found information on {url}")
+                        break
+        except Exception as e:
+            print(f"Error with {url}: {str(e)[:50]}")
+            continue
+
+# Fallback to simple web search
+if not found_info:
+    try:
+        # Try a simple HTTP request
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        search_url = f"https://www.thescore.com/nhl/news"
+        response = requests.get(search_url, headers=headers, timeout=10, verify=False)
+        
+        if response.status_code == 200:
+            print("Fallback search successful")
+            # Extract text and look for relevant info
+            soup = BeautifulSoup(response.text, 'html.parser')
+            text = soup.get_text()[:5000]  # First 5000 chars
+            
+            # Find relevant lines
+            for line in text.split('\\n'):
+                if any(term in line.lower() for term in query.lower().split()):
+                    print(line.strip()[:200])
+    except:
+        print("Unable to retrieve current information. Please check official sports websites.")
+```
+
+Remember:
+1. Always configure SSL settings at the start
+2. Use the Playwright service for JavaScript-heavy sites
+3. Try multiple sources
+4. Handle errors gracefully
+5. Print clear results"""
 
 # Test connections
 def test_vllm_connection():
@@ -230,6 +236,7 @@ try:
     playwright_ok = test_playwright_service()
     
     if vllm_ok:
+        # Initialize without the unsupported parameter
         bot = Assistant(
             llm=llm_cfg,
             system_message=system_prompt,
@@ -283,87 +290,106 @@ def chat():
 
         current_messages = [{'role': 'user', 'content': user_query}]
         
-        # DEFINITIVE FIX: Convert generator to list FIRST, then process
-        app.logger.info("🔄 Starting response generation...")
+        # Set a timeout for the entire operation
         start_time = time.time()
+        timeout = 60  # 60 seconds timeout
+        
+        app.logger.info("🔄 Starting response generation...")
         
         try:
-            # CRITICAL: Consume the ENTIRE generator first
-            app.logger.info("🔄 Consuming generator completely...")
-            all_message_batches = list(bot.run(messages=current_messages))
-            app.logger.info(f"✅ Generator consumed: {len(all_message_batches)} batches")
+            # Consume generator with timeout check
+            all_message_batches = []
+            for batch in bot.run(messages=current_messages):
+                all_message_batches.append(batch)
+                
+                # Check timeout
+                if time.time() - start_time > timeout:
+                    app.logger.warning("⚠️ Response generation timeout")
+                    break
             
-            # Flatten all batches into a single list
+            # Flatten all batches
             all_messages = []
             for batch in all_message_batches:
                 all_messages.extend(batch)
             
             app.logger.info(f"✅ Total messages collected: {len(all_messages)}")
             
-            # NOW process the complete collected response
+            # Process messages more robustly
             final_text = ""
-            tool_activities = []
+            code_output = ""
+            errors_encountered = False
             
-            # Process messages by type
-            for i, msg in enumerate(all_messages):
+            for msg in all_messages:
                 role = msg.get('role', '')
-                app.logger.debug(f"Processing message {i+1}/{len(all_messages)}: {role}")
                 
                 if role == 'assistant':
                     content = msg.get('content', '')
                     if isinstance(content, str):
-                        final_text += content
+                        # Clean the content
+                        content = content.strip()
+                        if content and not any(skip in content for skip in [
+                            'Invalid json', 'TypeError:', 'ValueError:', 
+                            'PermissionError:', 'Exception reporting mode',
+                            'UserWarning:', 'IPython parent'
+                        ]):
+                            final_text += content + "\n"
                     elif isinstance(content, list):
                         for item in content:
                             if item.get('type') == 'text':
-                                final_text += item.get('text', '')
-                
-                elif role == 'tool_calls':
-                    tool_calls = msg.get('content', [])
-                    for call in tool_calls:
-                        if call.get('type') == 'tool_code':
-                            tool_name = call.get('tool_name', 'code_interpreter')
-                            tool_activities.append(f"🔧 Executed {tool_name}")
+                                text = item.get('text', '').strip()
+                                if text:
+                                    final_text += text + "\n"
                 
                 elif role == 'tool_outputs':
-                    tool_outputs = msg.get('content', [])
-                    for output in tool_outputs:
-                        tool_name = output.get('tool_name', 'tool')
+                    outputs = msg.get('content', [])
+                    for output in outputs:
                         output_text = str(output.get('output', ''))
                         
-                        if output_text and len(output_text) > 20:
-                            if 'Error' not in output_text and 'Exception' not in output_text:
-                                if 'Playwright' in output_text or 'scrape' in output_text.lower():
-                                    tool_activities.append(f"🌐 Web scraping completed")
-                                else:
-                                    tool_activities.append(f"✅ Code execution completed")
-                            else:
-                                tool_activities.append(f"⚠️ Tool encountered issues")
+                        # Check for errors
+                        if any(err in output_text for err in ['Error:', 'error:', 'failed']):
+                            errors_encountered = True
+                        
+                        # Extract useful output
+                        if output_text and len(output_text) > 10:
+                            lines = output_text.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line and not any(skip in line for skip in [
+                                    'Exception reporting', 'Traceback', 'File "',
+                                    'UserWarning', 'IPython parent'
+                                ]):
+                                    # Extract actual results
+                                    if any(keep in line for keep in ['Found:', 'Checking', 'successful', 'Score:', 'Result:']):
+                                        code_output += line + "\n"
 
             processing_time = time.time() - start_time
             app.logger.info(f"✅ Response processing completed in {processing_time:.2f}s")
 
+            # Build the final response
+            final_text = final_text.strip()
+            code_output = code_output.strip()
+            
+            # If we have code output but no final text, create a response
+            if code_output and not final_text:
+                if "Unable to retrieve" in code_output or errors_encountered:
+                    final_text = "I encountered some issues while searching for that information. "
+                    final_text += "For the most current sports scores, I recommend checking:\n"
+                    final_text += "- ESPN.com\n- TheScore.com\n- Official team websites"
+                else:
+                    final_text = "Based on my search:\n\n" + code_output
+            
+            # If still no response, provide a helpful fallback
+            if not final_text or len(final_text) < 20:
+                final_text = "I attempted to search for that information but couldn't retrieve current results. "
+                final_text += "For real-time sports scores and information, please check official sources like ESPN or TheScore."
+
         except Exception as e:
             app.logger.error(f"❌ Error during bot.run(): {e}", exc_info=True)
-            return jsonify({"error": f"Error processing query: {str(e)}"}), 500
+            final_text = "I encountered an error while processing your request. Please try again with a simpler question."
 
-        # Build the final response
-        complete_response = final_text.strip()
+        app.logger.info(f"✅ Sending response - Length: {len(final_text)} characters")
         
-        if not complete_response:
-            if tool_activities:
-                complete_response = "I processed your request using tools, but didn't generate a text response. Check the tool activity for details."
-            else:
-                complete_response = "I received your query but didn't generate a response. Please try rephrasing your question."
-
-        # Add tool activity summary
-        if tool_activities:
-            complete_response += f"\n\n**Tool Activity:**\n" + "\n".join(tool_activities)
-
-        app.logger.info(f"✅ Sending complete response - Length: {len(complete_response)} characters")
-        app.logger.info(f"✅ Response preview: {complete_response[:100]}...")
-        
-        return jsonify({"response": complete_response})
+        return jsonify({"response": final_text})
 
     except Exception as e:
         app.logger.error(f"❌ Unhandled error in /chat endpoint: {e}", exc_info=True)

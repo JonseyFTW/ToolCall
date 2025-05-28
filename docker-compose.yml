@@ -59,6 +59,17 @@ services:
       - NODE_ENV=production
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
       - PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+      - DEFAULT_SEARCH_ENGINE=google  # or duckduckgo, bing
+      - MAX_SEARCH_RESULTS=5
+      - SEARCH_TIMEOUT=30
+      
+      # Caching
+      - ENABLE_CACHE=true
+      - CACHE_TTL_MINUTES=5
+      
+      # Rate limiting
+      - REQUESTS_PER_MINUTE=30
+      - CONCURRENT_REQUESTS=3
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
