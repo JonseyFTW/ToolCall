@@ -290,33 +290,27 @@ def chat():
 
         current_messages = [{'role': 'user', 'content': user_query}]
         
-        # Set a timeout for the entire operation
         start_time = time.time()
         timeout = 60  # 60 seconds timeout
         
         app.logger.info("🔄 Starting response generation...")
         
         try:
-            # Consume generator with timeout check
             all_message_batches = []
             for batch in bot.run(messages=current_messages):
                 all_message_batches.append(batch)
-                
-                # Check timeout
                 if time.time() - start_time > timeout:
                     app.logger.warning("⚠️ Response generation timeout")
                     break
             
-            # Flatten all batches
             all_messages = []
             for batch in all_message_batches:
                 all_messages.extend(batch)
             
             app.logger.info(f"✅ Total messages collected: {len(all_messages)}")
             
-            # Process messages more robustly
-            final_text = ""
-            code_output = ""
+            latest_assistant_content = ""  # Will store the content of the LAST assistant message
+            code_output_parts = []
             errors_encountered = False
             
             for msg in all_messages:
@@ -324,70 +318,75 @@ def chat():
                 
                 if role == 'assistant':
                     content = msg.get('content', '')
+                    current_message_text = ""
                     if isinstance(content, str):
-                        # Clean the content
-                        content = content.strip()
-                        if content and not any(skip in content for skip in [
+                        current_message_text = content.strip()
+                    elif isinstance(content, list):
+                        parts = []
+                        for item in content:
+                            if isinstance(item, dict) and item.get('type') == 'text':
+                                parts.append(item.get('text', ''))
+                        current_message_text = "".join(parts).strip() # Join parts without adding extra newlines here
+                    
+                    # If this message has actual content and is not a skippable/error line,
+                    # consider it as the current candidate for the final response.
+                    if current_message_text and not any(skip in current_message_text for skip in [
                             'Invalid json', 'TypeError:', 'ValueError:', 
                             'PermissionError:', 'Exception reporting mode',
-                            'UserWarning:', 'IPython parent'
+                            'UserWarning:', 'IPython parent' # Add any other undesirable intermediate outputs
                         ]):
-                            final_text += content + "\n"
-                    elif isinstance(content, list):
-                        for item in content:
-                            if item.get('type') == 'text':
-                                text = item.get('text', '').strip()
-                                if text:
-                                    final_text += text + "\n"
-                
+                        latest_assistant_content = current_message_text # Overwrite with the latest valid assistant message
+
                 elif role == 'tool_outputs':
                     outputs = msg.get('content', [])
-                    for output in outputs:
-                        output_text = str(output.get('output', ''))
+                    for output_item in outputs:
+                        output_text = str(output_item.get('output', ''))
                         
-                        # Check for errors
-                        if any(err in output_text for err in ['Error:', 'error:', 'failed']):
+                        if any(err in output_text.lower() for err in ['error:', 'failed', 'exception:']): # Make error check case-insensitive
                             errors_encountered = True
                         
-                        # Extract useful output
-                        if output_text and len(output_text) > 10:
+                        # Extract useful output from tools
+                        if output_text and len(output_text) > 5: # Reduced length check slightly
                             lines = output_text.split('\n')
                             for line in lines:
                                 line = line.strip()
-                                if line and not any(skip in line for skip in [
-                                    'Exception reporting', 'Traceback', 'File "',
-                                    'UserWarning', 'IPython parent'
+                                if line and not any(skip.lower() in line.lower() for skip in [
+                                    'exception reporting', 'traceback', 'file "',
+                                    'userwarning', 'ipython parent', '--- Logging error ---'
                                 ]):
-                                    # Extract actual results
-                                    if any(keep in line for keep in ['Found:', 'Checking', 'successful', 'Score:', 'Result:']):
-                                        code_output += line + "\n"
+                                    # Be more selective or ensure formatting if adding to code_output_parts
+                                    if any(keep.lower() in line.lower() for keep in ['found:', 'checking', 'successful', 'score:', 'result:']):
+                                        code_output_parts.append(line)
+                                    # You might want to add other relevant tool outputs as well.
 
             processing_time = time.time() - start_time
             app.logger.info(f"✅ Response processing completed in {processing_time:.2f}s")
 
-            # Build the final response
-            final_text = final_text.strip()
-            code_output = code_output.strip()
+            final_text = latest_assistant_content.strip()
+            code_output = "\n".join(code_output_parts).strip()
             
-            # If we have code output but no final text, create a response
-            if code_output and not final_text:
-                if "Unable to retrieve" in code_output or errors_encountered:
+            # Construct the final response
+            if not final_text or len(final_text) < 20: # If assistant's final response is too short or empty
+                if code_output and not errors_encountered:
+                    final_text = "Based on my search:\n\n" + code_output
+                elif errors_encountered: # Prioritize error message if errors occurred
                     final_text = "I encountered some issues while searching for that information. "
                     final_text += "For the most current sports scores, I recommend checking:\n"
                     final_text += "- ESPN.com\n- TheScore.com\n- Official team websites"
-                else:
-                    final_text = "Based on my search:\n\n" + code_output
-            
-            # If still no response, provide a helpful fallback
-            if not final_text or len(final_text) < 20:
-                final_text = "I attempted to search for that information but couldn't retrieve current results. "
-                final_text += "For real-time sports scores and information, please check official sources like ESPN or TheScore."
+                # Fallback if no good assistant response and no useful code_output
+                elif not final_text or len(final_text) < 20 : # Check again if final_text is still bad
+                     final_text = "I attempted to search for that information but couldn't retrieve current results. "
+                     final_text += "For real-time sports scores and information, please check official sources like ESPN or TheScore."
+
 
         except Exception as e:
-            app.logger.error(f"❌ Error during bot.run(): {e}", exc_info=True)
+            app.logger.error(f"❌ Error during bot.run() or message processing: {e}", exc_info=True)
             final_text = "I encountered an error while processing your request. Please try again with a simpler question."
 
         app.logger.info(f"✅ Sending response - Length: {len(final_text)} characters")
+        # Ensure final_text is not empty before sending
+        if not final_text:
+             final_text = "I'm sorry, I couldn't generate a response. Please try again."
         
         return jsonify({"response": final_text})
 
