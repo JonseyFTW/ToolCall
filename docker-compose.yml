@@ -1,83 +1,74 @@
-version: '3.8'
-
 services:
-  # Main Python application with Qwen agent
+  # Main Qwen Agent Application
   qwen-agent-chat:
     build:
       context: .
       dockerfile: Dockerfile
-    image: qwen-agent-chat:latest
     container_name: qwen-agent-chat
+    # Changed from expose to ports since nginx will use different ports
     ports:
-      - "5001:5001"
+      - "5001:5001"  # Keep direct access available
     environment:
-      - DEBUG=True
+      - DEBUG=${DEBUG:-True}
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
-      # SSL Configuration
       - VLLM_VERIFY_SSL=False
-      - PYTHONHTTPSVERIFY=0
-      - CURL_CA_BUNDLE=""
-      - REQUESTS_CA_BUNDLE=""
-      - SSL_VERIFY=false
-      # vLLM Configuration - UPDATE THESE WITH YOUR ACTUAL VALUES
-      - VLLM_CHAT_COMPLETIONS_URL=https://vllm.rangeresources.com/v1/chat/completions
-      - VLLM_MODELS_URL=https://vllm.rangeresources.com/v1/models
-      - VLLM_BASE_URL=https://vllm.rangeresources.com/v1/
-      - VLLM_MODEL=Qwen/Qwen3-30B-A3B-FP8
-      - VLLM_API_KEY=123456789
-      # Playwright Service Configuration
+      - VLLM_BASE_URL=${VLLM_BASE_URL}
+      - VLLM_MODEL=${VLLM_MODEL}
+      - VLLM_API_KEY=${VLLM_API_KEY}
       - PLAYWRIGHT_SERVICE_URL=http://playwright-service:3000
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - RESPONSE_TIMEOUT=${RESPONSE_TIMEOUT:-120}
+      - QWEN_AGENT_MAX_TOKENS=${QWEN_AGENT_MAX_TOKENS:-4000}
+      - QWEN_AGENT_TEMPERATURE=${QWEN_AGENT_TEMPERATURE:-0.3}
+      # SSL configuration
+      - SSL_ENABLED=${SSL_ENABLED:-false}
+      - DOMAIN_NAME=${DOMAIN_NAME:-localhost}
     depends_on:
       playwright-service:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - .\logs:/app/logs
+    networks:
+      - qwen-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
-    networks:
-      - qwen-network
+      start_period: 30s
 
-  # Enterprise Playwright web scraping service
+  # Playwright Web Scraping Service with fixed browser installation
   playwright-service:
     build:
       context: ./playwright-service
       dockerfile: Dockerfile
-    image: playwright-service:latest
     container_name: playwright-service
     expose:
       - "3000"
-    # Uncomment to access Playwright service directly (for debugging)
-    # ports:
-    #   - "3000:3000"
     environment:
       - NODE_ENV=production
+      - MAX_BROWSER_INSTANCES=${MAX_BROWSER_INSTANCES:-3}
+      - REQUESTS_PER_MINUTE=${REQUESTS_PER_MINUTE:-30}
+      - CACHE_TTL_MINUTES=${CACHE_TTL_MINUTES:-5}
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
       - PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
-      - DEFAULT_SEARCH_ENGINE=google  # or duckduckgo, bing
-      - MAX_SEARCH_RESULTS=5
-      - SEARCH_TIMEOUT=30
-      
-      # Caching
       - ENABLE_CACHE=true
-      - CACHE_TTL_MINUTES=5
-      
-      # Rate limiting
-      - REQUESTS_PER_MINUTE=30
-      - CONCURRENT_REQUESTS=3
+      - BLOCK_RESOURCES=true
     restart: unless-stopped
+    volumes:
+      - playwright-browsers:/ms-playwright  # Named volume for browsers
+      - .\logs\playwright:/app/logs
+    networks:
+      - qwen-network
+    # Windows-specific optimizations
+    shm_size: 1gb
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    # Resource limits for enterprise deployment
+      timeout: 15s
+      retries: 5
+      start_period: 60s  # Increased to allow browser installation
     deploy:
       resources:
         limits:
@@ -86,21 +77,84 @@ services:
         reservations:
           memory: 1G
           cpus: '0.5'
+
+  # Nginx reverse proxy with Windows-friendly ports
+  nginx:
+    image: nginx:1.24-alpine
+    container_name: qwen-nginx
+    ports:
+      # Use non-privileged ports that don't require admin on Windows
+      - "8080:80"    # HTTP on port 8080 instead of 80
+      - "8443:443"   # HTTPS on port 8443 instead of 443
+    volumes:
+      # Mount nginx configuration
+      - .\nginx\nginx.conf:/etc/nginx/nginx.conf:ro
+      # Mount SSL certificates (your .pem files)
+      - .\nginx\ssl:/etc/ssl:ro
+      # Mount logs for debugging
+      - .\logs\nginx:/var/log/nginx
+    depends_on:
+      qwen-agent-chat:
+        condition: service_healthy
     networks:
       - qwen-network
-    # Security settings
-    security_opt:
-      - no-new-privileges:true
-    read_only: false  # Playwright needs write access for browser cache
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=512m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
 
 networks:
   qwen-network:
     driver: bridge
     name: qwen-network
 
-# Optional: Add volumes for persistent data
+# Named volumes for persistent browser storage
+volumes:
+  playwright-browsers:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: .\data\playwright-cache
+
+# Alternative: For development without SSL/nginx, uncomment this simpler version
+# version: '3.8'
+# services:
+#   qwen-agent-chat:
+#     build: .
+#     ports:
+#       - "5001:5001"
+#     environment:
+#       - VLLM_BASE_URL=${VLLM_BASE_URL}
+#       - VLLM_MODEL=${VLLM_MODEL}
+#       - VLLM_API_KEY=${VLLM_API_KEY}
+#       - PLAYWRIGHT_SERVICE_URL=http://playwright-service:3000
+#     depends_on:
+#       - playwright-service
+#     networks:
+#       - qwen-network
+# 
+#   playwright-service:
+#     build: ./playwright-service
+#     expose:
+#       - "3000"
+#     shm_size: 1gb
+#     volumes:
+#       - playwright-browsers:/ms-playwright
+#     networks:
+#       - qwen-network
+# 
 # volumes:
-#   playwright-cache:
-#     driver: local
+#   playwright-browsers:
+# networks:
+#   qwen-network:

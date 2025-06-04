@@ -3,75 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Qwen-Agent Chat</title>
+    <title>Qwen-Agent Enterprise Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { 
             font-family: 'Inter', sans-serif; 
-            overscroll-behavior-y: contain; /* Prevents pull-to-refresh on mobile */
+            overscroll-behavior-y: contain;
         }
         #chat-window {
             display: flex;
             flex-direction: column;
-            gap: 0.75rem; /* space-y-3 */
+            gap: 1rem;
         }
         .chat-bubble {
-            padding: 0.75rem 1rem; /* py-3 px-4 */
-            border-radius: 0.75rem; /* rounded-xl */
-            max-width: 80%;
+            padding: 1rem 1.25rem;
+            border-radius: 1rem;
+            max-width: 85%;
             word-wrap: break-word;
             line-height: 1.6;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         .user-bubble {
-            background-color: #2563eb; /* bg-blue-600 */
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             align-self: flex-end;
             margin-left: auto;
-            border-bottom-right-radius: 0.25rem; /* rounded-br-sm */
+            border-bottom-right-radius: 0.25rem;
         }
         .bot-bubble {
-            background-color: #e5e7eb; /* bg-gray-200 */
-            color: #1f2937; /* text-gray-800 */
+            background: linear-gradient(135deg, #f093fb 0%, #f5f7fa 100%);
+            color: #2d3748;
             align-self: flex-start;
             margin-right: auto;
-            border-bottom-left-radius: 0.25rem; /* rounded-bl-sm */
+            border-bottom-left-radius: 0.25rem;
+            border: 1px solid #e2e8f0;
         }
-        .tool-activity {
-            background-color: #f3f4f6; /* bg-gray-100 */
-            border-left: 4px solid #3b82f6; /* border-l-4 border-blue-500 */
-            padding: 0.5rem;
+        .system-bubble {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            align-self: center;
+            max-width: 90%;
+            text-align: center;
+            font-size: 0.875rem;
+            padding: 0.75rem 1rem;
+            border-radius: 2rem;
+        }
+        .search-indicator {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            border-left: 4px solid #f56565;
+            padding: 0.75rem;
             margin-top: 0.5rem;
-            font-size: 0.875rem; /* text-sm */
-            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            border-radius: 0.5rem;
+            color: #2d3748;
+            font-weight: 500;
         }
-        /* Custom scrollbar for chat window */
-        #chat-window::-webkit-scrollbar {
-            width: 8px;
-        }
-        #chat-window::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 10px;
-        }
-        #chat-window::-webkit-scrollbar-thumb {
-            background: #c7c7c7;
-            border-radius: 10px;
-        }
-        #chat-window::-webkit-scrollbar-thumb:hover {
-            background: #a3a3a3;
-        }
-        /* Ensure full height on mobile and desktop */
         .main-container {
             height: 100vh;
-            max-height: 100vh; /* For iOS Safari */
+            max-height: 100vh;
             display: flex;
             flex-direction: column;
         }
         .chat-area {
             flex-grow: 1;
             overflow-y: auto;
+            background: linear-gradient(180deg, #f7fafc 0%, #edf2f7 100%);
         }
-         #loading-indicator svg {
+        #loading-indicator svg {
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
@@ -79,39 +78,142 @@
             to { transform: rotate(360deg); }
         }
         .typing-indicator {
-            background-color: #e5e7eb;
-            color: #6b7280;
-            padding: 0.75rem 1rem;
-            border-radius: 0.75rem;
-            max-width: 80%;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 1.25rem;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            max-width: 85%;
             align-self: flex-start;
             margin-right: auto;
             border-bottom-left-radius: 0.25rem;
-            font-style: italic;
         }
         .typing-dots {
-            display: inline-block;
-            animation: typingDots 1.5s infinite;
+            display: flex;
+            gap: 0.25rem;
         }
-        @keyframes typingDots {
-            0%, 60%, 100% { content: '...'; }
-            20% { content: ''; }
-            40% { content: '.'; }
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #667eea;
+            animation: typingBounce 1.4s infinite ease-in-out;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typingBounce {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+        .status-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.5rem 1rem;
+            font-size: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #48bb78;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .quick-actions {
+            display: flex;
+            gap: 0.5rem;
+            padding: 1rem;
+            flex-wrap: wrap;
+            background: #f7fafc;
+            border-top: 1px solid #e2e8f0;
+        }
+        .quick-action-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .quick-action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .metadata-info {
+            font-size: 0.75rem;
+            color: #718096;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: #f7fafc;
+            border-radius: 0.5rem;
+            border-left: 3px solid #667eea;
+        }
+        /* Custom scrollbar */
+        .chat-area::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-area::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .chat-area::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+        }
+        .chat-area::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
         }
     </style>
 </head>
-<body class="bg-gray-100">
-    <div class="main-container max-w-3xl mx-auto bg-white shadow-lg flex flex-col">
-        <header class="bg-gray-800 text-white p-4 text-center rounded-t-lg">
-            <h1 class="text-2xl font-semibold">Qwen-Agent Chat (with Web Access)</h1>
-            <p class="text-sm text-gray-300 mt-1">Powered by Qwen3-30B with Playwright web browsing</p>
+<body class="bg-gray-50">
+    <div class="main-container max-w-4xl mx-auto bg-white shadow-2xl flex flex-col">
+        <!-- Enhanced Header -->
+        <header class="bg-gradient-to-r from-gray-900 to-gray-700 text-white p-6 text-center">
+            <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                Qwen-Agent Enterprise
+            </h1>
+            <p class="text-gray-300 mt-2 text-sm">
+                AI Assistant with Dynamic Web Search • Powered by Qwen3-32B
+            </p>
         </header>
-        
-        <div id="chat-window" class="chat-area p-4 md:p-6">
-            </div>
 
-        <div id="loading-indicator" class="hidden flex items-center justify-center p-3 text-gray-600">
-            <svg class="h-5 w-5 mr-2 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span id="status-text">System Ready</span>
+            </div>
+            <div class="text-xs">
+                <span id="model-info">Qwen3-32B</span> • 
+                <span id="connection-status">Connected</span>
+            </div>
+        </div>
+        
+        <!-- Chat Area -->
+        <div id="chat-window" class="chat-area p-6">
+            <!-- Messages will be added here -->
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="hidden flex items-center justify-center p-4 bg-gray-50 border-t">
+            <svg class="h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="12" y1="2" x2="12" y2="6"></line>
                 <line x1="12" y1="18" x2="12" y2="22"></line>
                 <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
@@ -121,22 +223,52 @@
                 <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
                 <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
             </svg>
-            <span id="loading-text">Qwen is thinking...</span>
+            <span id="loading-text">Processing your request...</span>
         </div>
 
-        <footer class="p-4 md:p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-            <div class="flex items-center space-x-2">
-                <input type="text" id="message-input" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow duration-150" placeholder="Ask about current events, sports scores, or anything...">
-                <button id="send-button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-5 rounded-lg shadow-md hover:shadow-lg transition-all duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <button class="quick-action-btn" onclick="sendQuickMessage('What are the latest tech news?')">
+                📰 Latest Tech News
+            </button>
+            <button class="quick-action-btn" onclick="sendQuickMessage('Current stock market status')">
+                📈 Market Status
+            </button>
+            <button class="quick-action-btn" onclick="sendQuickMessage('Weather forecast today')">
+                🌤️ Weather
+            </button>
+            <button class="quick-action-btn" onclick="sendQuickMessage('Latest sports scores')">
+                ⚽ Sports Scores
+            </button>
+        </div>
+
+        <!-- Input Area -->
+        <footer class="p-6 border-t border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+            <div class="flex items-end space-x-3">
+                <div class="flex-grow">
+                    <textarea 
+                        id="message-input" 
+                        class="w-full p-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 resize-none bg-white shadow-inner" 
+                        placeholder="Ask about current events, search the web, or get real-time information..."
+                        rows="2"
+                        style="min-height: 3rem; max-height: 6rem;"
+                    ></textarea>
+                </div>
+                <button 
+                    id="send-button" 
+                    class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-4 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transform hover:scale-105"
+                >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
-                        <path d="M3.105 3.105a1.5 1.5 0 012.122-.001L19.43 14.43a1.515 1.515 0 01.301 1.907l-1.206 1.709a1.516 1.516 0 01-1.908.302L3.105 5.226a1.5 1.5 0 01-.001-2.121z" />
-                        <path d="M16.496 4.062L4.063 16.495a1.515 1.515 0 01-1.907-.301l-1.709-1.207a1.516 1.516 0 01-.301-1.907L14.373.568a1.5 1.5 0 012.123.001z" />
+                        <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.896 28.896 0 003.105 2.289z" />
                     </svg>
                 </button>
             </div>
-            <p class="text-xs text-gray-500 mt-3 text-center">
-                Model: Qwen3-30B via vLLM • Web browsing enabled • Fixed SSL & response handling
-            </p>
+            <div class="mt-3 text-xs text-gray-500 text-center">
+                <span class="font-medium">Enterprise AI Assistant</span> • 
+                Web Search Enabled • 
+                SSL Optimized • 
+                <span id="uptime">Ready</span>
+            </div>
         </footer>
     </div>
 
@@ -146,6 +278,16 @@
         const sendButton = document.getElementById('send-button');
         const loadingIndicator = document.getElementById('loading-indicator');
         const loadingText = document.getElementById('loading-text');
+        const statusText = document.getElementById('status-text');
+
+        let messageCount = 0;
+        let startTime = Date.now();
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
 
         function escapeHtml(unsafe) {
             return unsafe
@@ -157,44 +299,69 @@
         }
 
         function formatMessage(message) {
-            // Simple markdown-like formatting
             let formatted = escapeHtml(message);
             
-            // Bold text **text**
+            // Enhanced formatting
             formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            formatted = formatted.replace(/\*(.*?)\*/g, '<em>$1</em>');
+            formatted = formatted.replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 rounded">$1</code>');
             
-            // Tool activity section formatting
-            if (formatted.includes('**Tool Activity:**')) {
-                const parts = formatted.split('**Tool Activity:**');
-                if (parts.length === 2) {
-                    const mainText = parts[0].replace(/\n/g, '<br>');
-                    const toolActivity = parts[1].replace(/\n/g, '<br>');
-                    return mainText + '<div class="tool-activity"><strong>🔧 Tool Activity:</strong>' + toolActivity + '</div>';
-                }
+            // URL detection and linking
+            formatted = formatted.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" class="text-blue-600 hover:underline">$1</a>');
+            
+            // Search result formatting
+            if (formatted.includes('*Information gathered from web sources*')) {
+                const parts = formatted.split('*Information gathered from web sources*');
+                const mainText = parts[0].replace(/\n/g, '<br>');
+                return mainText + '<div class="search-indicator">🔍 Information gathered from web sources</div>';
             }
             
-            // Regular newlines to <br>
             return formatted.replace(/\n/g, '<br>');
         }
 
-        function addMessage(message, sender) {
+        function addMessage(message, sender, metadata = null) {
             const bubble = document.createElement('div');
-            bubble.classList.add('chat-bubble', sender === 'user' ? 'user-bubble' : 'bot-bubble');
             
-            // Format and display message
+            if (sender === 'system') {
+                bubble.classList.add('system-bubble');
+            } else {
+                bubble.classList.add('chat-bubble', sender === 'user' ? 'user-bubble' : 'bot-bubble');
+            }
+            
             const formattedMessage = formatMessage(message);
-            bubble.innerHTML = formattedMessage; 
+            bubble.innerHTML = formattedMessage;
+            
+            // Add metadata if provided
+            if (metadata && sender === 'bot') {
+                const metaDiv = document.createElement('div');
+                metaDiv.classList.add('metadata-info');
+                metaDiv.innerHTML = `
+                    ⏱️ ${metadata.processing_time || 'N/A'} • 
+                    🔍 ${metadata.web_search_performed ? 'Web Search Used' : 'Knowledge Base'} • 
+                    🕐 ${new Date(metadata.timestamp || Date.now()).toLocaleTimeString()}
+                `;
+                bubble.appendChild(metaDiv);
+            }
             
             chatWindow.appendChild(bubble);
-            // Scroll to the bottom smoothly
             chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
+            
+            messageCount++;
+            updateStatus();
         }
 
         function addTypingIndicator() {
             const typingBubble = document.createElement('div');
             typingBubble.classList.add('typing-indicator');
             typingBubble.id = 'typing-indicator';
-            typingBubble.innerHTML = 'Qwen is thinking<span class="typing-dots">...</span>';
+            typingBubble.innerHTML = `
+                <span>Qwen is thinking</span>
+                <div class="typing-dots">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            `;
             chatWindow.appendChild(typingBubble);
             chatWindow.scrollTo({ top: chatWindow.scrollHeight, behavior: 'smooth' });
         }
@@ -206,29 +373,46 @@
             }
         }
 
+        function updateStatus() {
+            const uptime = Math.floor((Date.now() - startTime) / 1000);
+            const uptimeText = uptime < 60 ? `${uptime}s` : `${Math.floor(uptime/60)}m`;
+            document.getElementById('uptime').textContent = uptimeText;
+            statusText.textContent = `${messageCount} messages processed`;
+        }
+
+        function sendQuickMessage(message) {
+            messageInput.value = message;
+            sendMessage();
+        }
+
         async function sendMessage() {
             const query = messageInput.value.trim();
             if (!query) return;
 
             addMessage(query, 'user');
             messageInput.value = '';
+            messageInput.style.height = 'auto';
             
-            // Show loading state
+            // Show enhanced loading state
             loadingIndicator.classList.remove('hidden');
+            addTypingIndicator();
             sendButton.disabled = true;
             messageInput.disabled = true;
             
-            // Update loading text based on query content
-            if (query.toLowerCase().includes('web') || 
-                query.toLowerCase().includes('current') || 
-                query.toLowerCase().includes('recent') ||
-                query.toLowerCase().includes('news') ||
-                query.toLowerCase().includes('today') ||
-                query.toLowerCase().includes('latest')) {
-                loadingText.textContent = 'Browsing the web for current information...';
+            // Dynamic loading text based on query
+            if (query.toLowerCase().includes('news') || query.toLowerCase().includes('latest')) {
+                loadingText.textContent = 'Searching latest news sources...';
+            } else if (query.toLowerCase().includes('weather')) {
+                loadingText.textContent = 'Fetching current weather data...';
+            } else if (query.toLowerCase().includes('stock') || query.toLowerCase().includes('market')) {
+                loadingText.textContent = 'Retrieving market information...';
+            } else if (query.toLowerCase().includes('sports') || query.toLowerCase().includes('score')) {
+                loadingText.textContent = 'Checking latest sports scores...';
             } else {
-                loadingText.textContent = 'Qwen is thinking...';
+                loadingText.textContent = 'Processing with AI and web search...';
             }
+
+            statusText.textContent = 'Processing request...';
 
             try {
                 const response = await fetch('/chat', {
@@ -245,31 +429,62 @@
                     throw new Error(responseData.error || `HTTP error! Status: ${response.status}`);
                 }
                 
-                addMessage(responseData.response, 'bot');
+                removeTypingIndicator();
+                addMessage(responseData.response, 'bot', responseData.metadata);
 
             } catch (error) {
                 console.error('Error sending message:', error);
-                addMessage(`Sorry, an error occurred: ${error.message}\n\nPlease check the backend logs for more details.`, 'bot');
+                removeTypingIndicator();
+                addMessage(`⚠️ Sorry, an error occurred: ${error.message}\n\nPlease check the system status and try again.`, 'bot');
             } finally {
                 loadingIndicator.classList.add('hidden');
-                loadingText.textContent = 'Qwen is thinking...';
+                loadingText.textContent = 'Processing your request...';
                 sendButton.disabled = false;
                 messageInput.disabled = false;
                 messageInput.focus();
+                updateStatus();
             }
         }
 
+        // Event listeners
         sendButton.addEventListener('click', sendMessage);
         messageInput.addEventListener('keypress', (event) => {
-            if (event.key === 'Enter' && !event.shiftKey) { // Send on Enter, allow Shift+Enter for new line
-                event.preventDefault(); // Prevent default Enter behavior (like form submission)
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
                 sendMessage();
             }
         });
 
-        // Initial welcome message
-        addMessage("Hello! I'm your Qwen-powered assistant with web browsing capabilities. I can search the internet for current information, sports scores, news, and more. What would you like to know?", 'bot');
+        // Health check and status updates
+        async function checkSystemHealth() {
+            try {
+                const response = await fetch('/health');
+                const health = await response.json();
+                
+                if (health.status === 'healthy') {
+                    statusText.textContent = 'System Healthy';
+                    document.getElementById('connection-status').textContent = 'Connected';
+                } else {
+                    statusText.textContent = 'System Issues Detected';
+                    document.getElementById('connection-status').textContent = 'Degraded';
+                }
+            } catch (error) {
+                statusText.textContent = 'Connection Error';
+                document.getElementById('connection-status').textContent = 'Offline';
+            }
+        }
+
+        // Initialize
+        addMessage("🚀 Welcome to Qwen-Agent Enterprise! I'm your AI assistant with advanced web search capabilities. I can help you find current information, analyze data, and answer questions using real-time web sources.", 'system');
+        addMessage("I can search for:\n• Latest news and current events\n• Real-time data (stocks, weather, sports)\n• Research and analysis\n• Technical information\n\nTry asking me about something happening right now!", 'bot');
+        
         messageInput.focus();
+        updateStatus();
+        checkSystemHealth();
+        
+        // Periodic health checks
+        setInterval(checkSystemHealth, 30000); // Every 30 seconds
+        setInterval(updateStatus, 1000); // Every second
     </script>
 </body>
 </html>

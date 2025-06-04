@@ -1,18 +1,30 @@
 {
   "name": "playwright-scraper-service",
-  "version": "1.0.0",
-  "description": "Enterprise Playwright web scraping service for Qwen Agent",
+  "version": "2.0.0",
+  "description": "Enterprise-grade Playwright web scraping service for Qwen Agent with dynamic search capabilities",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --inspect=0.0.0.0:9229 server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run test:health && npm run test:scrape",
+    "test:health": "curl -f http://localhost:3000/health || exit 1",
+    "test:scrape": "curl -X POST -H 'Content-Type: application/json' -d '{\"url\":\"http://example.com\",\"action\":\"content\"}' http://localhost:3000/scrape",
+    "benchmark": "node benchmark.js",
+    "clean": "npm run cache:clear",
+    "cache:clear": "curl -X DELETE http://localhost:3000/cache",
+    "cache:stats": "curl http://localhost:3000/cache/stats"
   },
   "keywords": [
     "playwright",
     "web-scraping",
     "enterprise",
-    "microservice"
+    "microservice",
+    "qwen-agent",
+    "dynamic-search",
+    "content-extraction",
+    "browser-automation",
+    "rate-limiting",
+    "caching"
   ],
   "author": "Enterprise AI Team",
   "license": "Apache-2.0",
@@ -20,7 +32,14 @@
     "express": "^4.18.2",
     "playwright": "^1.40.0",
     "cors": "^2.8.5",
-    "helmet": "^7.1.0"
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5",
+    "node-cache": "^5.1.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -29,5 +48,17 @@
   "repository": {
     "type": "git",
     "url": "private"
-  }
+  },
+  "config": {
+    "playwright": {
+      "browsers": ["chromium"],
+      "headless": true,
+      "timeout": 30000
+    }
+  },
+  "optionalDependencies": {},
+  "peerDependencies": {},
+  "bundledDependencies": [],
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64"]
 }
